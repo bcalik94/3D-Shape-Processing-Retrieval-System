@@ -1,0 +1,588 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Oct  6 21:38:19 2020
+STEP 3
+@author: berkcalik, begumhattat
+"""
+#Feature Extraction Functions
+from scipy.spatial.distance import pdist
+from matplotlib import pyplot as plt
+from pathlib import Path
+import os.path
+import math as m
+import numpy as np
+import trimesh as tm
+import pandas as pd
+from MR_Step2_v4 import *
+import random
+import math
+import sklearn
+
+
+#GLOBAL DESCRIPTORS
+
+#extracting the global features on one mesh
+def global_feature(mesh):
+    #csv = pd.read_csv('C:/Users/hatta/Desktop/3DImageInfo_before.csv')
+    
+    #total area
+    S = mesh.area
+    
+    #volume of the AABB 
+    #option a
+    #Vbb = mesh.extents[0] * mesh.extents[1] * mesh.extents[2]
+    #option b
+    Vbb = mesh.bounding_box.volume
+    
+    #volume of the mesh
+    V = mesh.volume
+    
+    #diameter
+    A = np.array(mesh.vertices)
+    D = pdist(A)
+    #D = squareform(D)
+    diam = np.nanmax(D)
+    
+    #compactness
+    c = (S**3) / (36*m.pi*(V**2))
+    
+    #sphericity
+    sph = 1/c
+    
+    #eccentricity
+    cov_m, eig_vals, eig_vecs = coveigen(mesh)
+    ecc = max(eig_vals)/min(eig_vals)
+    
+    #rectangularity
+    rect = V/Vbb
+    
+    #hull_descriptor
+    hull_area = mesh.convex_hull.area
+    hull_volume = mesh.convex_hull.volume
+    hull_v_s_ratio = hull_volume/hull_area
+    hull_num_of_facets = len(mesh.convex_hull.facets)
+    hull_comp = (hull_area**3) / (36*m.pi*(hull_volume**2))
+    
+    #centroid
+    cent = (sum(mesh.vertices))/mesh.vertices.shape[0]
+    
+    feature_dict = {'Area': S, 'Volume': V, 'Compactness': c,'Diam': diam, 
+                    'Sphericity': sph, 'Eccentricity': ecc, 'Centroid': cent, 'Rectangularity': rect,
+                    'Convex Hull area': hull_area, 'Convex Hull volume': hull_volume, 
+                    'Convex Hull V/S ratio': hull_v_s_ratio, 'Hull Facets num': hull_num_of_facets,
+                    'Convex Hull compactness': hull_comp}
+    return feature_dict
+
+
+#extracting the global features of meshes in a directory and exporting them to csv
+def global_features(in_dir, out_dir):
+    csv = pd.read_csv('C:/Users/hatta/Desktop/3DImageInfo_before.csv')
+    d = []
+    
+    for filename in os.listdir(in_dir):
+        current_dir = in_dir + '/' + filename        
+        split_string = filename.split("_")
+        class_name = split_string[0] 
+        file_name = split_string[1] 
+        mesh = tm.load(current_dir)
+        
+        #volume
+        V = csv.loc[csv['Image File'] == file_name, 'Volume'].values[0]
+         
+        #area
+        S = csv.loc[csv['Image File'] == file_name, 'Area'].values[0]
+        
+        #mesh bounding box volume
+        Vbb = mesh.bounding_box.volume
+        
+        #diameter
+        A = np.array(mesh.vertices)
+        D = pdist(A)
+        #D = squareform(D)
+        diam = np.nanmax(D)
+        
+        #compactness
+        c = (S**3) / (36*m.pi*(V**2))
+        
+        #sphericity
+        sph = 1/c
+        
+        #eccentricity
+        cov_m, eig_vals, eig_vecs = coveigen(mesh)
+        ecc = max(eig_vals)/min(eig_vals)
+        
+        #rectangularity
+        rect = V/Vbb
+        
+        #hull_descriptor
+        hull_area = mesh.convex_hull.area
+        hull_volume = mesh.convex_hull.volume
+        hull_v_s_ratio = hull_volume/hull_area
+        hull_num_of_facets = len(mesh.convex_hull.facets)
+        hull_comp = (hull_area**3) / (36*m.pi*(hull_volume**2))
+        
+        #centroid
+        cent = (sum(mesh.vertices))/mesh.vertices.shape[0]
+        
+        d.append({'Mesh': file_name, 'Class': class_name, 'Area': S, 'Volume': V, 
+                  'Compactness': c,'Diameter': diam, 
+                    'Sphericity': sph, 'Eccentricity': ecc, 'Centroid': cent, 
+                    'Rectangularity': rect,'Convex Hull area': hull_area, 
+                    'Convex Hull volume': hull_volume, 'Convex Hull V/S ratio': hull_v_s_ratio, 
+                    'Hull Facets num': hull_num_of_facets, 'Convex Hull compactness': hull_comp})
+        
+    df = pd.DataFrame(d)
+    name = 'global_features.csv'
+    p = Path(out_dir)
+    df.to_csv(Path(p, name), index = False)
+    print("The csv is created successfully.")
+
+
+#LOCAL DESCRIPTORS
+
+def contains(source, item):
+    for i in source:
+        if len(i) == len(item):
+            result = True
+            for x in range(len(i)):
+                if item[x] != i[x]:
+                    result = False
+                    break
+            
+            if result == True:
+                return True
+    return False
+
+#A3 Feature
+def a3(mesh):
+
+    setx = []
+    for vertex in mesh.vertices:
+        if not contains(setx, vertex):
+            setx.append(vertex)
+        
+    angle_list = list()    
+    for i in range(250000):
+        rand_vers = random.sample(setx, 3)  
+        v1 = rand_vers[1] - rand_vers[0]
+        v2 = rand_vers[2] - rand_vers[0]   
+        angle = tm.transformations.angle_between_vectors(v1,v2)   
+        angle_list.append(angle)
+    
+    angle_list = np.asarray(angle_list)
+    return angle_list
+
+
+#D1 Feature
+def d1(mesh):
+
+    dist_list = list()
+    b_center = mesh.centroid
+    
+    for i in range(250000):
+        
+        rand_vers = random.choice(mesh.vertices)
+        
+        squared_dist = np.sum((rand_vers - b_center)**2, axis=0)
+        dist = np.sqrt(squared_dist)
+        dist_list.append(dist)
+    
+    dist_list = np.asarray(dist_list)
+    return dist_list
+
+
+#D2 Feature
+def d2(mesh):
+
+    setx = []
+    for vertex in mesh.vertices:
+        if not contains(setx, vertex):
+            setx.append(vertex)
+        
+    dist_list = list() 
+    for i in range(250000):
+       
+        rand_vers = random.sample(setx, 2)     
+        squared_dist = np.sum((rand_vers[0] - rand_vers[1])**2, axis=0)
+        dist = np.sqrt(squared_dist)      
+        dist_list.append(dist)
+   
+    dist_list = np.asarray(dist_list)
+    return dist_list
+
+
+def edgelength(vect1, vect2):
+    import math
+    x1 = vect1[0]
+    y1 = vect1[1]
+    z1 = vect1[2]
+    x2 = vect2[0]
+    y2 = vect2[1]
+    z2 = vect2[2]
+    dist = math.sqrt((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2)
+    return dist
+
+
+#D3 Feature
+def d3(mesh): 
+    
+    setx = []
+    for vertex in mesh.vertices:
+        if not contains(setx, vertex):
+            setx.append(vertex)  
+            
+    area_list = list()
+    for i in range(250000):
+         
+        rand_vers = random.sample(setx, 3)
+        
+        vect1 = edgelength(rand_vers[1], rand_vers[0])
+        vect2 = edgelength(rand_vers[2], rand_vers[0])
+        
+        v1 = rand_vers[1] - rand_vers[0]
+        v2 = rand_vers[2] - rand_vers[0]
+        
+        # v3 = rand_vers[0] - rand_vers[1]
+        # v4 = rand_vers[2] - rand_vers[1]
+        
+        # v5 = rand_vers[0] - rand_vers[2]
+        # v6 = rand_vers[1] - rand_vers[2]
+   
+        angle = tm.transformations.angle_between_vectors(v1,v2)
+        # angle2 = tm.transformations.angle_between_vectors(v3,v4)
+        # angle3 = tm.transformations.angle_between_vectors(v5,v6)
+        
+        area = math.sqrt((np.dot(vect1,vect2) * math.sin(angle))/2)
+        
+        #tot_angles = angle+ angle2 + angle3
+        area_list.append(area)
+    
+    area_list = np.asarray(area_list)
+    return area_list 
+
+
+
+#D4 Feature
+def d4(mesh): 
+
+    setx = []
+    for vertex in mesh.vertices:
+        if not contains(setx, vertex):
+            setx.append(vertex)  
+    
+    volume_list = list()
+    
+    for i in range(250000):
+        vol = 0 
+        rand_vers = random.sample(setx, 3)
+        origin = mesh.centroid
+        firstvex = rand_vers[0] - origin
+        secondvex = rand_vers[1] - origin
+        thirdvex = rand_vers[2] - origin 
+           
+        vol = math.pow(abs(np.dot(np.cross(firstvex, secondvex),thirdvex))/6, 1/3)
+        
+        volume_list.append(vol)
+    volume_list = np.asarray(volume_list)
+    return volume_list
+
+
+#for a3 bins
+def angle_bin(angles):
+    b1,b2,b3,b4,b5,b6,b7,b8,b9,b10 = 0,0,0,0,0,0,0,0,0,0
+
+    binlist = list()
+    normalized_binlist = list()
+    max_range = 3.141592653589793
+    bin_width = max_range/10
+    for value in angles:   
+    
+        if value >= 0 and value < bin_width:
+            b1 += 1
+        elif value >= bin_width and value < bin_width*2:
+            b2 += 1
+        elif value >= bin_width*2 and value < bin_width*3:
+            b3 += 1
+        elif value >= bin_width*3 and value < bin_width*4:
+            b4 += 1
+        elif value >= bin_width*4 and value < bin_width*5:
+            b5 += 1
+        elif value >= bin_width*5 and value < bin_width*6:
+            b6 += 1
+        elif value >= bin_width*5 and value < bin_width*7:
+            b7 += 1
+        elif value >= bin_width*7 and value < bin_width*8:
+            b8 += 1
+        elif value >= bin_width*8 and value < bin_width*9:
+            b9 += 1
+        elif value >= bin_width*9 and value <= max_range:
+            b10 += 1
+        else:
+            pass
+    
+    binlist.extend([b1,b2,b3,b4,b5,b6,b7,b8,b9,b10])
+    #bin normalization
+    for element in binlist:
+        new = element/250000
+        normalized_binlist.append(new)
+    return normalized_binlist
+
+
+#for d1 bins
+def bin_centroid_dist(distances):
+    b1 = 0
+    b2 = 0
+    b3 = 0
+    b4 = 0
+    b5 = 0
+    b6 = 0
+    b7 = 0
+    b8 = 0
+    b9 = 0
+    b10 = 0
+    binlist = list()
+    normalized_binlist = list()
+    
+    for value in distances:   
+    
+        if value >= 0 and value < 0.1:
+            b1 += 1
+        elif value >= 0.1 and value < 0.2:
+            b2 += 1
+        elif value >= 0.2 and value < 0.3:
+            b3 += 1
+        elif value >= 0.3 and value < 0.4:
+            b4 += 1
+        elif value >= 0.4 and value < 0.5:
+            b5 += 1
+        elif value >= 0.5 and value < 0.6:
+            b6 += 1
+        elif value >= 0.6 and value < 0.7:
+            b7 += 1
+        elif value >= 0.7 and value < 0.8:
+            b8 += 1
+        elif value >= 0.8 and value < 0.9:
+            b9 += 1
+        elif value >= 0.9 and value <= 1.0:
+            b10 += 1
+        else:
+            pass
+    
+    binlist.extend([b1,b2,b3,b4,b5,b6,b7,b8,b9,b10])
+    for element in binlist:
+        new = element/250000
+        normalized_binlist.append(new)     
+    return normalized_binlist
+
+
+#for d2 bins
+def bin_dist(distances):
+    b1 = 0
+    b2 = 0
+    b3 = 0
+    b4 = 0
+    b5 = 0
+    b6 = 0
+    b7 = 0
+    b8 = 0
+    b9 = 0
+    b10 = 0
+    binlist = []
+    normalized_binlist = []
+    
+    for value in distances:   
+    
+        if value >= 0 and value < 0.1:
+            b1 += 1
+        elif value >= 0.1 and value < 0.2:
+            b2 += 1
+        elif value >= 0.2 and value < 0.3:
+            b3 += 1
+        elif value >= 0.3 and value < 0.4:
+            b4 += 1
+        elif value >= 0.4 and value < 0.5:
+            b5 += 1
+        elif value >= 0.5 and value < 0.6:
+            b6 += 1
+        elif value >= 0.6 and value < 0.7:
+            b7 += 1
+        elif value >= 0.7 and value < 0.8:
+            b8 += 1
+        elif value >= 0.8 and value < 0.9:
+            b9 += 1
+        elif value >= 0.9 and value <= 1.0:
+            b10 += 1
+        else:
+            pass
+    
+    binlist.extend([b1,b2,b3,b4,b5,b6,b7,b8,b9,b10])
+    for element in binlist:
+        new = element/250000
+        normalized_binlist.append(new)     
+    return normalized_binlist
+
+
+
+#for d3 bins
+def area_bin(area_dist):
+  #0-0.6 face area range   
+     #change it up to 4.5 !
+    max_area = 0.8
+    area_int = max_area/10
+    b1 = 0
+    b2 = 0
+    b3 = 0
+    b4 = 0
+    b5 = 0
+    b6 = 0
+    b7 = 0
+    b8 = 0
+    b9 = 0
+    b10 = 0
+    binlist = []
+    normalized_binlist = []
+    
+    for value in area_dist:    
+         if value >= 0 and value < area_int:
+             b1 += 1
+         elif value >= area_int   and value < area_int*2:
+             b2 += 1
+         elif value >= area_int *2 and value < area_int*3:
+             b3 += 1
+         elif value >= area_int *3 and value < area_int*4:
+             b4 += 1
+         elif value >= area_int*4 and value < area_int*5:
+             b5 += 1
+         elif value >= area_int*5 and value < area_int*6:
+             b6 += 1
+         elif value >= area_int*6 and value < area_int*7:
+             b7 += 1
+         elif value >= area_int*7 and value < area_int*8:
+             b8 += 1
+         elif value >= area_int*8 and value < area_int*9:
+             b9 += 1
+         elif value >= area_int*9 and value <= area_int*10:
+             b10 += 1
+         else:
+             pass    
+    binlist.extend([b1,b2,b3,b4,b5,b6,b7,b8,b9,b10])
+    for element in binlist:
+        new = element/250000
+        normalized_binlist.append(new)     
+    return normalized_binlist
+
+
+#for d4 bins
+def vol_bin(distances):
+    max_vol = 0.6
+    vol_int = max_vol/10
+    b1 = 0
+    b2 = 0
+    b3 = 0
+    b4 = 0
+    b5 = 0
+    b6 = 0
+    b7 = 0
+    b8 = 0
+    b9 = 0
+    b10 = 0
+    binlist = []
+    normalized_binlist = []
+    
+    for value in distances:   
+    
+        if value >= 0 and value < vol_int:
+            b1 += 1
+        elif value >= vol_int  and value < vol_int*2:
+            b2 += 1
+        elif value >= vol_int*2 and value < vol_int*3:
+            b3 += 1
+        elif value >= vol_int*3 and value < vol_int*4:
+            b4 += 1
+        elif value >= vol_int*4 and value < vol_int*5:
+            b5 += 1
+        elif value >= vol_int*5 and value < vol_int*6:
+            b6 += 1
+        elif value >= vol_int*6 and value < vol_int*7:
+            b7 += 1
+        elif value >=vol_int*7 and value < vol_int*8:
+            b8 += 1
+        elif value >= vol_int*8 and value < vol_int*9:
+            b9 += 1
+        elif value >= vol_int*9 and value <= vol_int*10:
+            b10 += 1
+        else:
+            pass
+        
+    binlist.extend([b1,b2,b3,b4,b5,b6,b7,b8,b9,b10])
+    for element in binlist:
+        new = element/250000
+        normalized_binlist.append(new)     
+    return normalized_binlist 
+
+
+
+def line_graph(bin1,bin2):
+    plt.style.use('seaborn-whitegrid')
+    x = np.linspace(0, 1, 10)
+    label1 = str(bin1)
+    plt.xlabel(label1)
+    plt.plot(x, bin1)
+    plt.plot(x, bin2)
+
+
+def local_extract(input_dir, output_dir): 
+
+    import pandas as pd
+    d = []
+    for filename in os.listdir(input_dir):
+        current_dir = input_dir + '/' + filename        
+        split_string = filename.split("_")
+        class_name = split_string[0] 
+        file_name = split_string[1] 
+        mesh = tm.load(current_dir)
+        
+        d1_bins = d1(mesh)
+        cent_dis = bin_centroid_dist(d1_bins)
+        print("d1 done")
+        a3_bins = a3(mesh)
+        angles = angle_bin(a3_bins)
+        print("a3 done")
+        d2_bins = d2(mesh)
+        dist_two = bin_dist(d2_bins)
+        print("d2 done")
+        d3_bins = d3(mesh)
+        area = area_bin(d3_bins)
+        print("d3 done")
+        d4_bins = d4(mesh)
+        volume = vol_bin(d4_bins)
+        print("d4 done")
+        d.append({"Mesh name": file_name, "Class name": class_name, "a3_bin1": angles[0],
+                  "a3_bin2": angles[1], "a3_bin3": angles[2], "a3_bin4": angles[3],
+                  "a3_bin5": angles[4], "a3_bin6": angles[5], "a3_bin7": angles[6],
+                 "a3_bin8": angles[7], "a3_bin9": angles[8], "a3_bin10": angles[9],
+                  "d1_bin1": cent_dis[0], "d1_bin2": cent_dis[1], "d1_bin3": cent_dis[2], 
+                  "d1_bin4": cent_dis[3],
+                  "d1_bin5": cent_dis[4], "d1_bin6": cent_dis[5], "d1_bin7": cent_dis[6],
+                 "d1_bin8": cent_dis[7], "d1_bin9": cent_dis[8], "d1_bin10": cent_dis[9],
+                 "d2_bin1": dist_two[0], "d2_bin2": dist_two[1], "d2_bin3": dist_two[2], 
+                 "d2_bin4": dist_two[3], "d2_bin5": dist_two[4], "d2_bin6": dist_two[5], 
+                 "d2_bin7": dist_two[6], "d2_bin8": dist_two[7], "d2_bin9": dist_two[8], 
+                 "d2_bin10": dist_two[9],  "d3_bin1":area[0], "d3_bin2": area[1], 
+                 "d3_bin3": area[2], 
+                 "d3_bin4": area[3], "d3_bin5": area[4], "d3_bin6": area[5], 
+                 "d3_bin7": area[6], "d3_bin8": area[7], "d3_bin9": area[8], 
+                 "d3_bin10": area[9], "d4_bin1":volume[0], "d4_bin2": volume[1], 
+                 "d4_bin3": volume[2], 
+                 "d4_bin4": volume[3], "d4_bin5": volume[4], "d4_bin6": volume[5], 
+                 "d4_bin7": volume[6], "d4_bin8": volume[7], "d4_bin9": volume[8], 
+                 "d4_bin10": volume[9]
+                 })
+       
+    name = 'local_features.csv'
+    p = Path(output_dir)
+    df = pd.DataFrame(d)
+    df.to_csv(Path(p, name), index = False)
+    print("csv is created.")
+    
+    
