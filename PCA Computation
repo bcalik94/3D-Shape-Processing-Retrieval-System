@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Sep 26 15:32:32 2020
+
+@author: berkcalik. begumhattat
+"""
+
+import numpy as np
+import scipy as sp
+import trimesh as tm
+import pyrender as pr
+#from pyrender import scene
+import os.path
+import open3d as o3d
+import pyvista as pv
+
+
+obj = tm.load('/Users/berkcalik/Desktop/MR/Multimedia Retrivial /m4.off')
+
+
+ 
+#Find the barycenter of a mesh
+def barycenter(mesh) :
+    area = mesh.area
+    S = 1/area
+    i = 0
+    loop_sum = 0 
+    for row in mesh.faces:
+        face_a = mesh.area_faces[i]
+        face_a.astype(int)
+        face_x = row[0]
+        face_y = row[1]
+        face_z = row[2]
+        #norm calculation here
+        vect = ((mesh.vertices[face_x] + mesh.vertices[face_y] + mesh.vertices[face_z])/3)
+        trivertices = (len(mesh.vertices)* face_a * S )*vect
+        loop_sum += trivertices
+        i += 1
+    
+    loop_ave = loop_sum/len(mesh.vertices)
+    
+    return loop_ave
+
+#translation of the object to origin
+def translate(mesh):
+    import numpy as np
+    new_vertix_list = list()
+    mesh_bary = barycenter(mesh)
+    for vertix in mesh.vertices:
+        row = vertix - mesh_bary
+        new_vertix_list.append(row)
+    translated_mesh = tm.Trimesh(vertices = new_vertix_list, faces = mesh.faces)
+    return translated_mesh
+
+#Find the eigenvectors and eigenvalues from covariance matrix
+
+def coveigen(mesh):
+    import numpy as np
+    i = 0
+    loop_sum = 0
+    mi = np.matrix(barycenter(mesh))
+    for row in mesh.faces:
+        face_a = mesh.area_faces[i]
+        gi = np.matrix(mesh.triangles_center[i])
+        diff = gi - mi
+        transpose = np.transpose(diff)
+        covrow = np.matmul(transpose,diff)
+        #print(covrow)
+        loop_i = face_a * covrow
+        loop_sum += loop_i
+        i +=1
+    cov_matr = loop_sum / len(mesh.faces)
+    eig_vals, eig_vecs = np.linalg.eig(cov_matr)
+    idx = eig_vals.argsort()[::-1]  
+    eig_vals = eig_vals[idx]
+    eig_vecs = eig_vecs[:,idx]
+    return(cov_matr, eig_vals, eig_vecs)
+
+#----------------------------
+                                 
+
+def flip(mesh):
+    import numpy as np
+    sumx,sumy,sumz = 0
+    for face in mesh.faces:
+        x = mesh.triangles_center[face][0]
+        y = mesh.triangles_center[face][1]
+        z = mesh.triangles_center[face][2]
+        sumx += np.sign(x) * (x**2)
+        sumy += np.sign(y) * (y**2)
+        sumz += np.sign(z) * (z**2)
+        
+        return sumx, sumy, sumz
+
+          
+          
+    
+    
+
+def rotate(eigen_vector,mesh) :
+     import numpy as np 
+     matrix_mesh = np.matrix(mesh.vertices)
+     result = np.matmul(matrix_mesh, eigen_vector)
+     return result 
+     # Ordered Eigen vector
+     # Translated vertices coordinates 
+     
+def scale_factor(mesh):
+    import math
+    #mesh.area_faces[i] # face area per triangle
+    #mesh.vertices[i] # x y and z coordinates of each vertix
+    area = mesh.area # total area of the mesh
+    scale = (1/area)
+    loop_sum = 0
+    i=0
+    for row in mesh.faces:
+        face_a = mesh.area_faces[i]
+        face_a.astype(int)
+        face_x = row[0]
+        face_y = row[1]
+        face_z = row[2]
+        #norm calculation here
+        vect = ((mesh.vertices[face_x] + mesh.vertices[face_y] + mesh.vertices[face_z])/3)
+        norm = math.sqrt(((vect[0]**2) + (vect[1]**2) + (vect[2]**2)))
+        loop_sum += face_a*norm
+        i += 1
+    scale_factor = scale*loop_sum
+    return scale_factor
+
+
+mesh = tm.Trimesh(vertices =rotation, faces = mesh_tm.faces)
+mesh.export('/Users/berkcalik/Desktop/fixed.off', file_type = 'off')
+
+
+
+
+
+
+
+
